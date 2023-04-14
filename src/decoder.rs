@@ -1,14 +1,15 @@
 use std::{fs, path::PathBuf};
 
+use crate::chunk::Chunks;
 use crate::header::Header;
-use crate::Result;
+use crate::{Point, Result};
 
-pub fn decode(file: PathBuf) -> Result<()> {
-    let file = fs::read_to_string(file).unwrap();
-    let data = file.into_bytes();
-    let header = match Header::new(&data) {
+pub fn decode(file: PathBuf) -> Result<Vec<Point>> {
+    let file = fs::read(file)?;
+    let header = match Header::new(&file) {
         Ok(header) => header,
         Err(e) => return Err(e),
     };
-    Ok(())
+    let chunks = Chunks::new(file[14..].into(), header.width, header.height);
+    chunks.decode()
 }
