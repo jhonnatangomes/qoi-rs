@@ -7,6 +7,7 @@ pub use crate::decoder::decode;
 type Error = Box<dyn std::error::Error>;
 pub type Result<T> = std::result::Result<T, Error>;
 type Pixel = (u8, u8, u8, u8);
+#[derive(Debug)]
 pub struct Point {
     pub x: u32,
     pub y: u32,

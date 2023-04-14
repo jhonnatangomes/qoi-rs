@@ -1,14 +1,5 @@
 use crate::{Pixel, Point, Result};
 
-// pub enum Chunk {
-//     QoiOpRgb(u8, u8, u8, u8),
-//     QoiOpRgba(u8, u8, u8, u8, u8),
-//     QoiOpIndex(u8),
-//     QoiOpDiff(u8),
-//     QoiOpLuma(u8, u8),
-//     QoiOpRun(u8),
-// }
-
 pub struct Chunks {
     data: Vec<u8>,
     index: usize,
@@ -45,16 +36,16 @@ impl Chunks {
                 },
             };
         }
-        // let end_byte = self.data[self.index];
-        // if end_byte != 0b00000001 {
-        //     return Err(format!("Invalid end byte {end_byte}").into());
-        // }
+        let end_byte_stream = &self.data[self.index..];
+        if end_byte_stream != &[0, 0, 0, 0, 0, 0, 0, 1] {
+            return Err(format!("Invalid end byte stream {:?}", end_byte_stream).into());
+        }
         Ok(self.points)
     }
     fn index_to_position(&self) -> (u32, u32) {
         (
-            self.index as u32 % self.width,
-            self.index as u32 / self.width,
+            self.points.len() as u32 % self.width,
+            self.points.len() as u32 / self.width + 1,
         )
     }
     fn next(&mut self) -> Option<u8> {
@@ -99,30 +90,32 @@ impl Chunks {
         Ok(())
     }
     fn qoi_op_diff(&mut self, byte: u8) -> Result<()> {
-        let dr = byte >> 4 & 0b00000011;
-        let dg = byte >> 2 & 0b00000011;
-        let db = byte & 0b00000011;
+        let dr = (byte >> 4 & 0b00000011).wrapping_sub(2);
+        let dg = (byte >> 2 & 0b00000011).wrapping_sub(2);
+        let db = (byte & 0b00000011).wrapping_sub(2);
         let pixel = (
-            self.previous_pixel.0.wrapping_add(dr).wrapping_sub(2),
-            self.previous_pixel.1.wrapping_add(dg).wrapping_sub(2),
-            self.previous_pixel.2.wrapping_add(db).wrapping_sub(2),
+            self.previous_pixel.0.wrapping_add(dr),
+            self.previous_pixel.1.wrapping_add(dg),
+            self.previous_pixel.2.wrapping_add(db),
             self.previous_pixel.3,
         );
         self.add_point(pixel);
         Ok(())
     }
     fn qoi_op_luma(&mut self, byte: u8) -> Result<()> {
-        let dg = byte & 0b00111111;
+        let dg = (byte & 0b00111111).wrapping_sub(32);
         let byte = self.next().ok_or(format!(
             "Unexpected EOF at byte {}, position {}",
             self.data[self.index], self.index
         ))?;
-        let dr = byte >> 4 & 0b00001111 + dg;
-        let db = byte & 0b00001111 + dg;
+        let dr_dg = (byte >> 4 & 0b00001111).wrapping_sub(8);
+        let db_dg = (byte & 0b00001111).wrapping_sub(8);
+        let dr = dr_dg.wrapping_add(dg);
+        let db = db_dg.wrapping_add(dg);
         let pixel = (
-            self.previous_pixel.0.wrapping_add(dr).wrapping_sub(40),
-            self.previous_pixel.1.wrapping_add(dg).wrapping_sub(32),
-            self.previous_pixel.2.wrapping_add(db).wrapping_sub(40),
+            self.previous_pixel.0.wrapping_add(dr),
+            self.previous_pixel.1.wrapping_add(dg),
+            self.previous_pixel.2.wrapping_add(db),
             self.previous_pixel.3,
         );
         self.add_point(pixel);
@@ -137,6 +130,7 @@ impl Chunks {
     }
     fn add_point(&mut self, pixel: Pixel) {
         self.previous_pixel = pixel;
+        self.previously_seen_pixels[index_hash(pixel)] = pixel;
         let position = self.index_to_position();
         self.points.push(Point {
             x: position.0,
@@ -150,27 +144,12 @@ fn two_bit_tag(byte: u8) -> u8 {
     byte >> 6
 }
 
-// impl Iterator for Chunks {
-//     type Item = Chunk;
-//     fn next(&mut self) -> Option<Self::Item> {
-//         if self.index >= self.data.len() {
-//             return None;
-//         }
-//         match self.data[self.index] {
-//             _ => None,
-//         }
-//     }
-// }
-//
-// impl From<Chunk> for Pixel {
-//     fn from(chunk: Chunk) -> Self {
-//         match chunk {
-//             Chunk::QoiOpRgb(_, r, g, b) => (r, g, b, 255).into(),
-//             Chunk::QoiOpRgba(_, r, g, b, a) => (r, g, b, a).into(),
-//             Chunk::QoiOpIndex(i) => Point::Index(0),
-//             Chunk::QoiOpDiff(_) => Point::Diff(0),
-//             Chunk::QoiOpLuma(_, _) => Point::Luma(0, 0),
-//             Chunk::QoiOpRun(_) => Point::Run(0),
-//         }
-//     }
-// }
+fn index_hash(pixel: Pixel) -> usize {
+    let pixel = (
+        pixel.0 as usize,
+        pixel.1 as usize,
+        pixel.2 as usize,
+        pixel.3 as usize,
+    );
+    (pixel.0 * 3 + pixel.1 * 5 + pixel.2 * 7 + pixel.3 * 11) % 64
+}
